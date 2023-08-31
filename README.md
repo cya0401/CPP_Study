@@ -125,3 +125,112 @@ end_thread = 0x57ea50 <one_thread_per_connection_end(THD*, bool)>, end = 0}
 3、传统虚拟化支持多种操作系统，而容器虚拟化仅支持内核所支持的操作系统。
 
 [# docker容器与虚拟机有什么区别？](https://www.zhihu.com/question/48174633)
+
+术语解释：(认为应该List出来的术语解释)
+Hypervisor：也称为虚拟机监视器(virtual machine monitor,VMM)，是众多允许多个操作系统(称为guest)在主机上同时运行的虚拟化技术其中一种。
+VM：也称Guest OS或者Guest，是可以在Hypervisor中运行的操作系统。 与Host OS对应，其是安装在硬件设备上的系统。
+GIC：全称是Generic Interrupt Controller，中文名称通用中断控制器，从外围设备获取中断，确定它们的优先级，并将它们传送到适当的处理器内核。
+Passthrough：直通，是关于为给定的guest操作系统提供设备隔离，以便该设备可以由该guest独占使用。
+IRQ：为 Interrupt ReQuest的缩写，即中断请求。
+vCPU：即电脑中的虚拟处理器，相对于物理CPU而言，vCPU是虚拟机内的CPU。
+List Registers：Hypervisor控制接口中的LR寄存器，用来产生虚拟中断。
+
+Terminology: technical terms that should be interpreted with simple words or phrases.
+1、	本发明可应用于哪些类型的产品？例如：芯片、芯片模组、终端、基站等。请尽量列举出所有可能。应用于不同类型的产品时， 相应的技术方案是否会有不同，例如被执行的步骤的差异，包含的组件的差异。
+What types of products can this invention be applied to?  For example: chips, chip modules, terminals, base stations, etc. Please try to list all the possibilities. For different types of products, will there be any differences, such as the differences in steps to be performed,  the differences in the components included, etc.
+芯片/汽车智能座舱
+
+2、	本发明要解决的技术问题是什么？
+What technical problems is this invention related to?
+当前Hypervisor，在接收硬件中断时，常见的方式为通过相关寄存器判断是哪个VM的中断之后，再分发虚拟中断到对应的VM，这种方式就是用hypervisor接管了硬件中断，再供给上层VM虚拟化中断。
+在虚拟化系统中，I/O外设往往只有一套，此时有多个VM需要使用外设，Hypervisor提供了两种方式来实现VM对于硬件外设的访问，分别是passthrough和emulation。当某个硬件设备被配置为passthrough模式时，使得某一VM排他的使用该外设，绕过hypervisor就像将该外设物理连接到所配置VM上一样。这样能够提升性能、降低延迟且可直接利用物理机上的设备驱动，但若有其他VM临时需要获取该外设中信息，则不可能实现，本发明专利即解决上述问题。
+
+3、	本发明的关键点和欲保护点是什么？
+What is the key point or the target of this invention?
+本发明提出一种在传统中断虚拟化技术中，当某一外设被配置passthrough给某一VM时，若有其余VM想要在后续获取该外设的中断信息，通过GIC能够给其余VM并行发送中断信息的方法。
+本发明在上述正常工作的硬件架构中，单独再通过一条通路连接外设及GIC，并在hypervisor中设立一个Arbitrator（中断仲裁器）。当其余VM需要获取外设中断信息时，通过Hypervisor中仲裁器与GIC配合使能外设与GIC之间通路，并通过Hypervisor中的Allocator将中断信息发送到对应VM。
+
+4、	详细介绍技术背景,并描述已有的与本发明最相近似的实现方案及其缺点
+Introduce the background information as detailed as possible, and describe the similar art concerning the present invention and the disadvantages thereof)
+对于Hypervisor来说，中断响应过程如下图1所示。
+
+
+
+
+
+
+
+
+图1 Hypervisor中断响应过程
+当物理外设产生中断信号时，将信号发送给GIC，GIC内部的Distributor将物理IRQ发送至CPU Interface，此时CPU退出Guest OS返回至Host OS，跳转到Hypervisor模式，并由Host OS驱动响应此中断信号，分配中断向List Register写入Virtual IRQ，再经由Virtual CPU Interface发送至vCPU处理，注入Virtual IRQ到对应Guest OS。
+通常的在Hypervisor中的常用方法是使用设备模拟，如下图2所示，在此结构图中，Hypervisor包括各种客户操作系统可以共享的通用设备的仿真，包括虚拟磁盘、虚拟网络适配器等。基于Hypervisor的设备仿真的另一个变体是半虚拟化驱动程序。在这个模型中，Hypervisor包括物理驱动程序，每个客户操作系统都包括一个与管理程序驱动程序协同工作的Hypervisor感知驱动程序（称为半虚拟化或PV驱动程序）。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+图2 基于Hypervisor的设备仿真
+然而，上述所述共享设备的方法是需要付出代价的，对系统存在额外开销。只要设备需要由多个客户操作系统共享，这种开销是值得的。如果不需要共享，则有更有效的共享设备的方法，即Passthrough，如下图3所示。Passthrough直通是关于为给定的Guest操作系统提供设备隔离，以便该设备可以由该Guest独占使用，这样做的好处有很多，其中最重要的两个就是可以提高性能以及提供对本质上不可共享的设备独占使用。
+
+
+
+
+
+
+
+
+
+图3 Hypervisor中的直通
+但此时如果有别的VM想要获取已经Passthrough设备的中断信息，由于Passthrough固有的被事先配置的VM独占使用的特性，在实际使用中是无法完成此项任务的。本发明提出的方案即解决上述问题。
+
+5、	本发明技术方案的详细阐述，应该结合流程图、原理框图、电路图、时序图进行说明（可编辑格式的附图）
+ Detailed description of the embodiments should be combined with the flow chart, principle figure, circuit diagram, time-sequence diagram， etc.（editable drawings）
+对于Hypervisor框架做出基于本发明的修改，优化框架设计如下图4所示。在GIC中新增Interrupt Controller模块，在Hypervisor中新增IRQ Arbitrator、IRQ-Allocator-BE模块，在除配置为Passthrough的VM外的其余VM新增IRQ-Allocator-FE模块。
+
+
+
+
+
+
+
+
+
+
+
+
+
+图4 针对Hypervisor的框架设计
+在此架构设计中，物理外设与GIC之间新增Interrupt Controller模块，物理外设有一通路连接至Interrupt Controller模块，此通路在除配置为Passthrough的VM外的其余VM无需获取该物理外设的中断信息时为Disabled状态，当其余VM需要获取时，由Hypervisor控制Interrupt Controller使能此通路，此时中断信息会由此通路，经过Interrupt Controller发送至Hypervisor中的IRQ Arbitrator。所设IRQ Arbitrator功能为接收其余VM需要获取中断信息的请求并记录在VM列表，记录信息包含需要获取的外设编号。所设IRQ Allocator在各个VM中为前端程序，用IRQ Allocator-FE标识，在Hypervisor中为后端程序，用IRQ Allocator-BE标识，IRQ Allocator-FE将各个VM获取物理外设中断信息的需求传递至Hypervisor中的IRQ Allocator-BE，后者再将需求传递至IRQ Arbitrator。
+假设系统中现有两个被配置为Passthrough的设备，分别为Device0和Device1，Device0被配置给VM0，Device1被配置给VM1。单独对于Device0，其被VM0排他的使用，当其余VM需要获取其中断信息时，在原有架构中不可能完成。在本专利设计架构中，如下图5所示，每个VM中都设有IRQ Allocator-FE，与Hypervisor中的IRQ Allocator-BE连接，Device0与Device1皆有通路与Interrupt Controller连接。当除VM0外的其余VM如VM1需要获取Device0的中断信息时，工作顺序如下：
+1.	由VM通过IRQ Allocator-FE向Hypervisor中的IRQ Allocator-BE发起获取中断信息申请；
+2.	IRQ Allocator-BE接收申请后向IRQ Arbitrator注册申请信息，其中包括需要获取信息的Device设备编号以及VM自身编号，放入队列；
+3.	IRQ Arbitrator接收请求后，使能Interrupt Controller与对应Device之间通路，中断信息经由此通路再经过GIC发送至IRQ Arbitrator；
+4.	IRQ Arbitrator按照队列中记录信息，将Device中断信息通过IRQ Allocator-BE发送至对应VM的IRQ Allocator-FE；
+5.	IRQ Allocator-FE接收信息完成后给IRQ Arbitrator发送应答，后者收到应答后关闭Interrupt Controller与Device之间通路，准备下一次工作。
+同理对于Device1工作也是如此。
+当系统中多其余VM对多Device申请获取中断信息时，如VM2尝试获取Device0、VM3尝试获取Device0、VM2尝试获取Device1的中断信息，则都通过IRQ Allocator发送请求至IRQ Arbitrator，后者将请求按优先顺序放进队列依次处理，并对同Device的请求进行归并，将该Device的中断请求并行发送至多请求VM，实现正常工作。
+
+
+
+
+
+
+
+
+
+
+
+
+
+图5 多VM多Device工作示意图
+通过以上系统框架设计，可实现并行发送中断至多VM。
